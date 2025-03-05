@@ -3,7 +3,7 @@ const http = require("http");
 const { Server } = require("socket.io");
 const axios = require("axios");
 const cors = require("cors");
-require('dotenv').config();
+require("dotenv").config();
 
 const app = express();
 const server = http.createServer(app);
@@ -11,7 +11,7 @@ const server = http.createServer(app);
 // Enable CORS for all connections
 const io = new Server(server, {
   cors: {
-    origin: "*", // Allow all origins
+    origin: "*", // Allow all origins (consider setting this to your frontend URL in production)
     methods: ["GET", "POST"],
   },
 });
@@ -24,35 +24,71 @@ io.on("connection", (socket) => {
 
   socket.on("user_message", async (message) => {
     try {
-      const response = await axios.post(
+      // Check if the model is available
+      const modelCheck = await axios.get(
         "https://api-inference.huggingface.co/models/gpt2",
-        { inputs: message },
         {
           headers: {
             Authorization: `Bearer ${process.env.HUGGING_FACE_API_TOKEN}`,
           },
-          responseType: "stream",
         }
       );
 
-      response.data.on("data", (chunk) => {
+      if (modelCheck.data?.error) {
+        console.error("Model loading error:", modelCheck.data.error);
+        socket.emit(
+          "bot_message_chunk",
+          "Model is currently loading. Please try again."
+        );
+        socket.emit("bot_message_done");
+        return;
+      }
+
+      // Retry mechanism in case of 503 errors
+      const maxRetries = 5;
+      for (let i = 0; i < maxRetries; i++) {
         try {
-          const data = JSON.parse(chunk.toString());
+          const response = await axios.post(
+            "https://api-inference.huggingface.co/models/gpt2",
+            { inputs: message },
+            {
+              headers: {
+                Authorization: `Bearer ${process.env.HUGGING_FACE_API_TOKEN}`,
+              },
+            }
+          );
+
+          const data = response.data;
           if (data?.generated_text) {
             socket.emit("bot_message_chunk", data.generated_text);
+          } else {
+            socket.emit("bot_message_chunk", "No response from model.");
           }
-        } catch (err) {
-          console.error("Error parsing chunk:", err);
-        }
-      });
+          break; // Exit retry loop on success
 
-      response.data.on("end", () => {
-        socket.emit("bot_message_done");
-      });
+        } catch (error) {
+          console.error(`Retrying... (${i + 1}/${maxRetries})`);
+          if (i === maxRetries - 1) {
+            socket.emit(
+              "bot_message_chunk",
+              "Error: Unable to fetch response after multiple attempts."
+            );
+          }
+          await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds before retrying
+        }
+      }
+      
+      socket.emit("bot_message_done");
 
     } catch (error) {
-      console.error("Error fetching from Hugging Face API:", error.message);
-      socket.emit("bot_message_chunk", "Error: Unable to fetch response.");
+      console.error(
+        "Error fetching from Hugging Face API:",
+        error.response?.data || error.message
+      );
+      socket.emit(
+        "bot_message_chunk",
+        "Error: Unable to fetch response from Hugging Face API."
+      );
       socket.emit("bot_message_done");
     }
   });
