@@ -3,10 +3,10 @@ const http = require("http");
 const { Server } = require("socket.io");
 const axios = require("axios");
 const cors = require("cors");
+require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
-require('dotenv').config();
 
 // Enable CORS for all connections
 const io = new Server(server, {
@@ -23,17 +23,16 @@ io.on("connection", (socket) => {
   console.log("A user connected");
 
   socket.on("user_message", async (message) => {
-   const response = await axios.post(
-    "https://api-inference.huggingface.co/models/gpt2",
-    { inputs: message },
-    {
-        headers: {
+    try {
+      const response = await axios.post(
+        "https://api-inference.huggingface.co/models/gpt2",
+        { inputs: message },
+        {
+          headers: {
             Authorization: `Bearer ${process.env.HUGGING_FACE_API_TOKEN}`,
-        },
-        responseType: "stream",
-    }
-);
-
+          },
+          responseType: "stream",
+        }
       );
 
       response.data.on("data", (chunk) => {
@@ -50,6 +49,7 @@ io.on("connection", (socket) => {
       response.data.on("end", () => {
         socket.emit("bot_message_done");
       });
+
     } catch (error) {
       console.error("Error fetching from Hugging Face API:", error.message);
       socket.emit("bot_message_chunk", "Error: Unable to fetch response.");
