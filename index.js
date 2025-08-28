@@ -11,7 +11,7 @@ const server = http.createServer(app);
 // Enable CORS for all connections
 const io = new Server(server, {
   cors: {
-    origin: "*", // Allow all origins (consider setting this to your frontend URL in production)
+    origin: "*", // Allow all origins (use frontend URL in production)
     methods: ["GET", "POST"],
   },
 });
@@ -24,43 +24,34 @@ io.on("connection", (socket) => {
 
   socket.on("user_message", async (message) => {
     try {
-      // Check if the model is available
-      const modelCheck = await axios.get(
-        "https://api-inference.huggingface.co/models/gpt2",
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.HUGGING_FACE_API_TOKEN}`,
-          },
-        }
-      );
-
-      if (modelCheck.data?.error) {
-        console.error("Model loading error:", modelCheck.data.error);
-        socket.emit(
-          "bot_message_chunk",
-          "Model is currently loading. Please try again."
-        );
-        socket.emit("bot_message_done");
-        return;
-      }
-
-      // Retry mechanism in case of 503 errors
+      // OpenRouter API request
       const maxRetries = 5;
+
       for (let i = 0; i < maxRetries; i++) {
         try {
           const response = await axios.post(
-            "https://api-inference.huggingface.co/models/gpt2",
-            { inputs: message },
+            "https://api.openrouter.ai/v1/chat/completions",
+            {
+              model: "gpt-4o-mini", // You can use any OpenRouter-supported model
+              messages: [
+                {
+                  role: "user",
+                  content: message,
+                },
+              ],
+            },
             {
               headers: {
-                Authorization: `Bearer ${process.env.HUGGING_FACE_API_TOKEN}`,
+                "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                "Content-Type": "application/json",
               },
             }
           );
 
           const data = response.data;
-          if (data?.generated_text) {
-            socket.emit("bot_message_chunk", data.generated_text);
+          if (data?.choices?.length > 0) {
+            const text = data.choices.map(c => c.message.content).join("\n");
+            socket.emit("bot_message_chunk", text);
           } else {
             socket.emit("bot_message_chunk", "No response from model.");
           }
@@ -74,20 +65,20 @@ io.on("connection", (socket) => {
               "Error: Unable to fetch response after multiple attempts."
             );
           }
-          await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds before retrying
+          await new Promise((resolve) => setTimeout(resolve, 2000));
         }
       }
-      
+
       socket.emit("bot_message_done");
 
     } catch (error) {
       console.error(
-        "Error fetching from Hugging Face API:",
+        "Error fetching from OpenRouter API:",
         error.response?.data || error.message
       );
       socket.emit(
         "bot_message_chunk",
-        "Error: Unable to fetch response from Hugging Face API."
+        "Error: Unable to fetch response from OpenRouter API."
       );
       socket.emit("bot_message_done");
     }
