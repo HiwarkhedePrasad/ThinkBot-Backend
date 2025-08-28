@@ -58,6 +58,7 @@ io.on("connection", (socket) => {
           break; // Exit retry loop on success
 
         } catch (error) {
+          console.error(error);
           console.error(`Retrying... (${i + 1}/${maxRetries})`);
           if (i === maxRetries - 1) {
             socket.emit(
@@ -92,3 +93,4 @@ io.on("connection", (socket) => {
 server.listen(5000, "0.0.0.0", () => {
   console.log("Server running on render");
 });
+
